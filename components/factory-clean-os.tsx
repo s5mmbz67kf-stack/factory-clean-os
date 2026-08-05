@@ -268,12 +268,12 @@ function LoginScreen({
     });
 
     if (resetError) {
-      setError("לא הצלחנו לשלוח קישור איפוס כרגע. נסה שוב בעוד רגע.");
+      setError("לא הצלחנו לשלוח הוראות איפוס כרגע. נסה שוב בעוד רגע.");
       setResetBusy(false);
       return;
     }
 
-    setNotice("שלחנו קישור לאיפוס הסיסמה. בדוק גם בתיקיית הספאם.");
+    setNotice("שלחנו קוד או קישור לאיפוס הסיסמה. בדוק גם בתיקיית הספאם.");
     setResetBusy(false);
   }
 
@@ -356,7 +356,7 @@ function LoginScreen({
           {mode === "admin" ? (
             <div className="login-help-row">
               <button type="button" className="link-button" onClick={sendPasswordReset} disabled={resetBusy}>
-                {resetBusy ? "שולח קישור…" : "שכחתי סיסמה"}
+                {resetBusy ? "שולח הוראות…" : "שכחתי סיסמה"}
               </button>
             </div>
           ) : null}
