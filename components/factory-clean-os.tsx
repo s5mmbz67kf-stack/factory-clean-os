@@ -240,7 +240,42 @@ function LoginScreen({
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("password-updated") === "1") {
+      setNotice("הסיסמה עודכנה בהצלחה. אפשר להיכנס עם הסיסמה החדשה.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  async function sendPasswordReset() {
+    const cleanEmail = email.trim();
+    setError("");
+    setNotice("");
+
+    if (!cleanEmail) {
+      setError("הכנס קודם את כתובת האימייל של המנהל.");
+      return;
+    }
+
+    setResetBusy(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    if (resetError) {
+      setError("לא הצלחנו לשלוח קישור איפוס כרגע. נסה שוב בעוד רגע.");
+      setResetBusy(false);
+      return;
+    }
+
+    setNotice("שלחנו קישור לאיפוס הסיסמה. בדוק גם בתיקיית הספאם.");
+    setResetBusy(false);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -318,8 +353,16 @@ function LoginScreen({
               required
             />
           </label>
+          {mode === "admin" ? (
+            <div className="login-help-row">
+              <button type="button" className="link-button" onClick={sendPasswordReset} disabled={resetBusy}>
+                {resetBusy ? "שולח קישור…" : "שכחתי סיסמה"}
+              </button>
+            </div>
+          ) : null}
           {error ? <p className="form-error">{error}</p> : null}
-          <button className="primary-button large" disabled={busy}>
+          {notice ? <p className="form-success">{notice}</p> : null}
+          <button className="primary-button large" disabled={busy || resetBusy}>
             {busy ? "נכנס…" : "כניסה למערכת"}
           </button>
         </form>
