@@ -486,12 +486,57 @@ export default function FactoryCleanOS() {
   }, [supabase, toast]);
 
   useEffect(() => {
-    void loadData();
+    let mounted = true;
+
+    async function bootstrapAuth() {
+      try {
+        // Supabase magic links may return either an implicit-flow hash
+        // (#access_token=...) or a PKCE query parameter (?code=...).
+        // Consume either form before checking the current session.
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+        const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+        }
+
+        if (code || accessToken || refreshToken || url.searchParams.has("error")) {
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+
+        if (mounted) await loadData();
+      } catch (authError) {
+        console.error("Magic-link authentication failed", authError);
+        if (mounted) {
+          toast("קישור ההתחברות אינו תקף או שפג תוקפו. בקש קישור חדש.", "error");
+          setBooting(false);
+        }
+      }
+    }
+
+    void bootstrapAuth();
+
     const { data } = supabase.auth.onAuthStateChange(() => {
-      window.setTimeout(() => void loadData(), 0);
+      window.setTimeout(() => {
+        if (mounted) void loadData();
+      }, 0);
     });
-    return () => data.subscription.unsubscribe();
-  }, [loadData, supabase]);
+
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, [loadData, supabase, toast]);
 
   useEffect(() => {
     if (!session) return;
