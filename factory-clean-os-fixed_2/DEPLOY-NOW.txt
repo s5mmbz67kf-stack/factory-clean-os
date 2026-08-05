@@ -1,0 +1,13 @@
+FACTORY CLEAN OS — מה עושים עכשיו
+
+1. פותחים GitHub ויוצרים Repository פרטי בשם factory-clean-os.
+2. מחלצים את ה-ZIP ומעלים את כל הקבצים שבתיקייה.
+3. פותחים Vercel > Add New > Project ומייבאים את ה-Repository.
+4. מוסיפים ב-Vercel שלושה משתנים:
+   NEXT_PUBLIC_SUPABASE_URL
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+   SUPABASE_SECRET_KEY
+5. לוחצים Deploy.
+6. נכנסים בקישור הקבוע עם האימייל והסיסמה של המנהל.
+
+חשוב: את SUPABASE_SECRET_KEY מעתיקים ישירות מ-Supabase ל-Vercel. לא שולחים אותו בצ'אט ולא מעלים ל-GitHub.
