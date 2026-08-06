@@ -159,6 +159,60 @@ function normalizePhone(value: string) {
   return digits;
 }
 
+// ממיר תאריך בפורמט ישראלי נפוץ (15/8/2026, 15.08.26, 15-8 וכו') ל-YYYY-MM-DD
+// כפי ששדה <input type="date"> דורש. אם הטקסט לא נראה כמו תאריך תקין,
+// מוחזר מחרוזת ריקה - כדי שלעולם לא יוזן בטעות תאריך שגוי בשקט.
+function parseIsraeliDate(raw: string) {
+  if (!raw) return "";
+  const match = raw.trim().match(/^(\d{1,2})[./\-](\d{1,2})(?:[./\-](\d{2,4}))?/);
+  if (!match) return "";
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  if (day < 1 || day > 31 || month < 1 || month > 12) return "";
+  let year = match[3] ? Number(match[3]) : new Date().getFullYear();
+  if (year < 100) year += 2000;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// פרסור של טקסט "עבודה" שהבעלים שולח לעובדים בפורמט קבוע (שם הלקוח / מספר
+// טלפון / עיר / רחוב + מספר / שעה / מה צריך לנקות / סכום כסף / תאריך ביצוע
+// העבודה) לאובייקט שדות מוכן להזנה בטופס. שדה שלא זוהה בטקסט חוזר כמחרוזת
+// ריקה ולא נוגע בערך הקיים בטופס - כדי שלא נמחוק בטעות משהו שהוזן ידנית.
+function parseJobPaste(text: string) {
+  const grab = (labelPattern: string) => {
+    const match = text.match(new RegExp(`(?:${labelPattern})\\s*:\\s*(.+)`, "i"));
+    return match ? match[1].trim() : "";
+  };
+
+  const customerName = grab("שם\\s*ה?לקוח");
+  const phoneRaw = grab("מספר\\s*טלפון|טלפון");
+  const city = grab("עיר");
+  const address = grab("רחוב\\s*\\+?\\s*מספר|כתובת");
+  const time = grab("שעה");
+  const description = grab("מה\\s*צריך\\s*לנקות");
+  const amountRaw = grab("סכום\\s*כסף|סכום");
+  const dateRaw = grab("תאריך\\s*ביצוע\\s*ה?עבודה|תאריך");
+
+  const phone = normalizePhone(phoneRaw);
+  const amount = amountRaw.replace(/[^\d.]/g, "");
+  const date = parseIsraeliDate(dateRaw);
+
+  const noteLines: string[] = [];
+  if (time) noteLines.push(`שעה: ${time}`);
+  if (description) noteLines.push(`מה צריך לנקות: ${description}`);
+
+  return {
+    customerName,
+    phone,
+    city,
+    address,
+    amount,
+    date,
+    notes: noteLines.join("\n"),
+    hasAnything: Boolean(customerName || phone || city || address || amount || date || time || description),
+  };
+}
+
 function Modal({
   title,
   eyebrow,
@@ -240,56 +294,30 @@ function LoginScreen({
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [resetBusy, setResetBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("password-updated") === "1") {
-      setNotice("הסיסמה עודכנה בהצלחה. אפשר להיכנס עם הסיסמה החדשה.");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
-
-  async function sendPasswordReset() {
-    const cleanEmail = email.trim();
-    setError("");
-    setNotice("");
-
-    if (!cleanEmail) {
-      setError("הכנס קודם את כתובת האימייל של המנהל.");
-      return;
-    }
-
-    setResetBusy(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-
-    if (resetError) {
-      setError("לא הצלחנו לשלוח הוראות איפוס כרגע. נסה שוב בעוד רגע.");
-      setResetBusy(false);
-      return;
-    }
-
-    setNotice("שלחנו קוד או קישור לאיפוס הסיסמה. בדוק גם בתיקיית הספאם.");
-    setResetBusy(false);
-  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
 
-    const loginEmail = mode === "admin" ? email.trim() : workerEmailFromPhone(phone);
+    // .toLowerCase() נוסף כדי שהתחברות מנהל לא תיכשל רק בגלל אותיות
+    // גדולות/קטנות שהוקלדו אחרת ממה שנשמר בפועל ב-Supabase Auth.
+    const loginEmail = mode === "admin" ? email.trim().toLowerCase() : workerEmailFromPhone(phone);
     const { error: loginError } = await supabase.auth.signInWithPassword({
       email: loginEmail,
       password,
     });
 
     if (loginError) {
-      setError(mode === "employee" ? "מספר הטלפון או הקוד האישי אינם נכונים." : "האימייל או הסיסמה אינם נכונים.");
+      // אבחון זמני לבעיית ההתחברות (למחוק אחרי שהתקלה נפתרת בפועל): מציג
+      // בקונסול ועל המסך את הודעת השגיאה האמיתית שחוזרת מ-Supabase, ולא
+      // רק את הניסוח הכללי - כדי להבחין בין סיסמה שגויה בפועל לבין בעיית
+      // תצורה (URL/מפתח שגויים, בעיית רשת וכו') שנראית למשתמש בדיוק אותו
+      // הדבר אחרת.
+      console.error("[FactoryCleanOS login] שגיאת signInWithPassword מ-Supabase:", loginError);
+      const genericMessage = mode === "employee" ? "מספר הטלפון או הקוד האישי אינם נכונים." : "האימייל או הסיסמה אינם נכונים.";
+      setError(`${genericMessage} (פרטי שגיאה זמניים לאבחון: ${loginError.message})`);
       setBusy(false);
       return;
     }
@@ -353,16 +381,8 @@ function LoginScreen({
               required
             />
           </label>
-          {mode === "admin" ? (
-            <div className="login-help-row">
-              <button type="button" className="link-button" onClick={sendPasswordReset} disabled={resetBusy}>
-                {resetBusy ? "שולח הוראות…" : "שכחתי סיסמה"}
-              </button>
-            </div>
-          ) : null}
           {error ? <p className="form-error">{error}</p> : null}
-          {notice ? <p className="form-success">{notice}</p> : null}
-          <button className="primary-button large" disabled={busy || resetBusy}>
+          <button type="submit" className="primary-button large" disabled={busy}>
             {busy ? "נכנס…" : "כניסה למערכת"}
           </button>
         </form>
@@ -486,57 +506,12 @@ export default function FactoryCleanOS() {
   }, [supabase, toast]);
 
   useEffect(() => {
-    let mounted = true;
-
-    async function bootstrapAuth() {
-      try {
-        // Supabase magic links may return either an implicit-flow hash
-        // (#access_token=...) or a PKCE query parameter (?code=...).
-        // Consume either form before checking the current session.
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
-        const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        } else if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) throw error;
-        }
-
-        if (code || accessToken || refreshToken || url.searchParams.has("error")) {
-          window.history.replaceState({}, "", window.location.pathname);
-        }
-
-        if (mounted) await loadData();
-      } catch (authError) {
-        console.error("Magic-link authentication failed", authError);
-        if (mounted) {
-          toast("קישור ההתחברות אינו תקף או שפג תוקפו. בקש קישור חדש.", "error");
-          setBooting(false);
-        }
-      }
-    }
-
-    void bootstrapAuth();
-
+    void loadData();
     const { data } = supabase.auth.onAuthStateChange(() => {
-      window.setTimeout(() => {
-        if (mounted) void loadData();
-      }, 0);
+      window.setTimeout(() => void loadData(), 0);
     });
-
-    return () => {
-      mounted = false;
-      data.subscription.unsubscribe();
-    };
-  }, [loadData, supabase, toast]);
+    return () => data.subscription.unsubscribe();
+  }, [loadData, supabase]);
 
   useEffect(() => {
     if (!session) return;
@@ -1097,6 +1072,7 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
 }) {
   const [saving, setSaving] = useState(false);
   const [newCustomer, setNewCustomer] = useState(false);
+  const [pasteText, setPasteText] = useState("");
   const [form, setForm] = useState<Record<string, string>>({
     employeeId: isAdmin ? employees[0]?.id || "" : currentEmployee?.id || "",
     jobDate: today(),
@@ -1123,6 +1099,42 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
   });
 
   const setValue = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
+
+  // ממלא את הטופס אוטומטית מהטקסט שהודבק (התבנית הקבועה ששולח הבעלים
+  // לעובדים). אם מספר הטלפון שזוהה תואם ללקוח קיים - עוברים אוטומטית למצב
+  // "לקוח קיים" ובוחרים אותו, כדי לא ליצור כפילויות לקוחות; אם לא נמצאה
+  // התאמה - עוברים למצב "לקוח חדש" עם השדות ממולאים. שדה/שירות/סוג עבודה
+  // ממשיכים להיבחר ידנית כפי שהתבקש.
+  function applyPaste() {
+    const parsed = parseJobPaste(pasteText);
+    if (!parsed.hasAnything) {
+      toast("לא זוהו פרטים בטקסט שהודבק - יש לוודא שהפורמט תואם לתבנית הקבועה.", "error");
+      return;
+    }
+
+    if (parsed.phone) {
+      const existing = customers.find((customer) => normalizePhone(customer.phone || "") === parsed.phone);
+      if (existing) {
+        setNewCustomer(false);
+        setValue("customerId", existing.id);
+        if (existing.city) setValue("city", existing.city);
+      } else {
+        setNewCustomer(true);
+        setValue("customerId", "");
+      }
+    }
+
+    if (parsed.customerName) setValue("customerName", parsed.customerName);
+    if (parsed.phone) setValue("customerPhone", parsed.phone);
+    if (parsed.city) { setValue("customerCity", parsed.city); setValue("city", parsed.city); }
+    if (parsed.address) setValue("customerAddress", parsed.address);
+    if (parsed.amount) setValue("grossAmount", parsed.amount);
+    if (parsed.date) setValue("jobDate", parsed.date);
+    if (parsed.notes) setValue("notes", parsed.notes);
+
+    toast("הפרטים מולאו אוטומטית - כדאי לעבור עליהם לפני השמירה.", "success");
+  }
+
   const selectedEmployee = employees.find((employee) => employee.id === form.employeeId);
   const calculatedRate = form.source === "owner" || form.payMode === "none" ? 0 : form.payMode === "fixed" ? 0 : form.useDefaultRate === "true" ? (form.source === "midrag" ? selectedEmployee?.midrag_rate || 0 : selectedEmployee?.regular_rate || 0) : safeNumber(form.ratePercent);
   const employeePay = form.payMode === "fixed" ? safeNumber(form.fixedPay) : safeNumber(form.grossAmount) * calculatedRate / 100;
@@ -1187,6 +1199,18 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
   return (
     <Modal title="הוספת עבודה" eyebrow="עבודה" onClose={onClose} wide>
       <form onSubmit={submit} className="modal-form">
+        <div className="pay-settings">
+          <div className="panel-title"><div><span className="eyebrow">מילוי מהיר</span><h3>הדבקת פרטי עבודה</h3></div></div>
+          <p className="helper-text">אפשר להדביק כאן את הטקסט שמתקבל על העבודה, והמערכת תמלא לבד את הלקוח, הכתובת, הסכום והתאריך. נשאר רק לבחור עובד, שירות וסוג עבודה.</p>
+          <textarea
+            rows={6}
+            placeholder={"שם הלקוח:\nמספר טלפון:\nעיר:\nרחוב + מספר:\nשעה:\nמה צריך לנקות:\nסכום כסף:\nתאריך ביצוע העבודה:"}
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+          />
+          <div className="modal-actions"><button type="button" className="secondary-button" onClick={applyPaste}>מילוי אוטומטי מהטקסט</button></div>
+        </div>
+
         <div className="form-grid two">
           <label><span>תאריך</span><input type="date" value={form.jobDate} onChange={(e) => setValue("jobDate", e.target.value)} required /></label>
           {isAdmin ? <label><span>עובד</span><select value={form.employeeId} onChange={(e) => setValue("employeeId", e.target.value)} required>{employees.filter((employee) => employee.active).map((employee) => <option key={employee.id} value={employee.id}>{employee.name} — {employee.regular_rate}% / {employee.midrag_rate}%</option>)}</select></label> : <label><span>עובד</span><input value={currentEmployee?.name || profile.full_name} disabled /></label>}

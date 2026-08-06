@@ -3,236 +3,154 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { createBrowserSupabase } from "@/lib/supabase";
 
-type PageState = "checking" | "link-ready" | "otp-ready" | "saving" | "success";
+// דף זה מטפל בקישור שמגיע מהמייל של "Send password recovery" ב-Supabase
+// Dashboard (Authentication → Users → המשתמש → Reset password). הקישור ההוא
+// מפנה בדיוק לכתובת הזו (/reset-password) - בלי הדף הזה, המייל היה מגיע
+// ל"עמוד לא נמצא". Supabase מעביר את פרטי ההתחברות הזמניים דרך ה-URL עצמו,
+// והלקוח (createBrowserSupabase) קולט אותם אוטומטית ברגע שהדף נטען.
+
+type Status = "checking" | "ready" | "invalid";
 
 export default function ResetPasswordPage() {
   const supabase = useMemo(() => createBrowserSupabase(), []);
-  const [pageState, setPageState] = useState<PageState>("checking");
-  const [email, setEmail] = useState("");
-  const [token, setToken] = useState("");
+  const [status, setStatus] = useState<Status>("checking");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
-
-  const isOtpFlow = pageState === "otp-ready";
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
-    let active = true;
+    // אם הקישור פג תוקף או כבר נעשה בו שימוש, Supabase מחזיר שגיאה בתוך
+    // ה-hash של ה-URL עצמו (למשל #error=access_denied&error_description=...).
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const hashError = hashParams.get("error_description");
+    if (hashError) {
+      setError(hashError);
+      setStatus("invalid");
+      return;
+    }
 
-    const finishWithSession = () => {
-      if (!active) return;
-      setError("");
-      setPageState("link-ready");
-    };
+    let settled = false;
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session && (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
-        finishWithSession();
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY" && !settled) {
+        settled = true;
+        setStatus("ready");
       }
     });
 
-    async function initializeRecovery() {
-      const searchParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-      const urlError = searchParams.get("error_description") || hashParams.get("error_description");
-
-      if (urlError) {
-        if (!active) return;
-        setError("הקישור אינו תקף. אפשר להשתמש בקוד האימות שקיבלת במייל.");
-        setPageState("otp-ready");
-        return;
+    // רשת ביטחון: אם האירוע כבר קרה לפני שהתחלנו להאזין, נבדוק אם יש כבר
+    // session תקף (זה מה שהאירוע PASSWORD_RECOVERY בעצם יוצר).
+    supabase.auth.getSession().then(({ data }) => {
+      if (settled) return;
+      if (data.session) {
+        settled = true;
+        setStatus("ready");
+      } else {
+        window.setTimeout(() => {
+          if (!settled) setStatus("invalid");
+        }, 2500);
       }
+    });
 
-      const code = searchParams.get("code");
-      if (code) {
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-        if (!exchangeError) {
-          finishWithSession();
-          return;
-        }
-      }
-
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (!active) return;
-
-      if (!sessionError && data.session) {
-        finishWithSession();
-        return;
-      }
-
-      // Some Supabase recovery emails contain a one-time code instead of a link.
-      setPageState("otp-ready");
-    }
-
-    void initializeRecovery();
-
-    return () => {
-      active = false;
-      authListener.subscription.unsubscribe();
-    };
+    return () => listener.subscription.unsubscribe();
   }, [supabase]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
 
-    if (password.length < 8) {
-      setError("הסיסמה צריכה להכיל לפחות 8 תווים.");
+    if (password.length < 6) {
+      setError("הסיסמה חייבת להכיל לפחות 6 תווים.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("הסיסמאות שהוקלדו אינן זהות.");
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError("שתי הסיסמאות אינן זהות.");
-      return;
-    }
-
-    if (isOtpFlow) {
-      const cleanEmail = email.trim();
-      const cleanToken = token.replace(/\s/g, "");
-
-      if (!cleanEmail) {
-        setError("הכנס את כתובת האימייל של המנהל.");
-        return;
-      }
-
-      if (!/^\d{6,8}$/.test(cleanToken)) {
-        setError("הכנס את קוד האימות שקיבלת במייל.");
-        return;
-      }
-
-      setPageState("saving");
-      const { error: verifyError } = await supabase.auth.verifyOtp({
-        email: cleanEmail,
-        token: cleanToken,
-        type: "recovery",
-      });
-
-      if (verifyError) {
-        setError("קוד האימות שגוי או שפג תוקפו. בקש קוד חדש ונסה שוב.");
-        setPageState("otp-ready");
-        return;
-      }
-    } else {
-      setPageState("saving");
-    }
-
+    setBusy(true);
     const { error: updateError } = await supabase.auth.updateUser({ password });
+    setBusy(false);
 
     if (updateError) {
-      setError(updateError.message || "לא הצלחנו לעדכן את הסיסמה. נסה שוב.");
-      setPageState(isOtpFlow ? "otp-ready" : "link-ready");
+      setError(updateError.message);
       return;
     }
-
-    setPageState("success");
-    await supabase.auth.signOut();
-    window.setTimeout(() => {
-      window.location.assign("/?password-updated=1");
-    }, 1400);
+    setDone(true);
   }
 
   return (
-    <main className="login-page reset-password-page">
-      <section className="login-copy">
-        <div className="brand-lockup">
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <div className="login-card" style={{ margin: 0 }}>
+        <div className="brand-lockup" style={{ marginBottom: 22 }}>
           <div className="brand-mark">F</div>
           <div>
-            <strong>Factory Clean</strong>
-            <span>מערכת ניהול העסק</span>
+            <strong>Factory Clean OS</strong>
+            <span>איפוס סיסמה</span>
           </div>
         </div>
-        <h1>חוזרים לעסק.</h1>
-        <p>אמת את החשבון ובחר סיסמה חדשה. לאחר השמירה תחזור למסך הכניסה.</p>
-        <div className="login-benefits">
-          <span>✓ אפשר להשתמש בקישור או בקוד שקיבלת במייל</span>
-          <span>✓ הסיסמה החדשה צריכה להכיל לפחות 8 תווים</span>
-          <span>✓ הקוד הוא חד־פעמי ואינו הסיסמה הקבועה</span>
-        </div>
-      </section>
 
-      <section className="login-card reset-card">
-        <span className="eyebrow">אבטחת חשבון</span>
-        <h2>הגדרת סיסמה חדשה</h2>
+        {status === "checking" && !error ? <p className="helper-text">בודק את הקישור...</p> : null}
 
-        {pageState === "checking" ? (
-          <div className="reset-status" role="status">
-            <span className="spinner" aria-hidden="true" />
-            <strong>בודק את פרטי האיפוס…</strong>
-            <p>זה לוקח רק כמה שניות.</p>
-          </div>
+        {status === "invalid" ? (
+          <>
+            <h2>הקישור אינו תקף</h2>
+            <p className="form-error">{error || "הקישור פג תוקף או כבר נעשה בו שימוש."}</p>
+            <p className="helper-text">
+              יש לבקש קישור חדש: Supabase Dashboard ← Authentication ← Users ← המשתמש ← Reset password ← Send password recovery.
+            </p>
+          </>
         ) : null}
 
-        {pageState === "success" ? (
-          <div className="reset-status" role="status">
-            <div className="status-icon success">✓</div>
-            <strong>הסיסמה עודכנה בהצלחה</strong>
-            <p>מעביר אותך למסך הכניסה…</p>
-          </div>
+        {status === "ready" && !done ? (
+          <>
+            <h2>קביעת סיסמה חדשה</h2>
+            <form className="form-stack" onSubmit={submit}>
+              <label>
+                <span>סיסמה חדשה</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  minLength={6}
+                  autoFocus
+                />
+              </label>
+              <label>
+                <span>אימות סיסמה</span>
+                <input
+                  type="password"
+                  value={confirm}
+                  onChange={(event) => setConfirm(event.target.value)}
+                  required
+                  minLength={6}
+                />
+              </label>
+              {error ? <p className="form-error">{error}</p> : null}
+              <button type="submit" className="primary-button large" disabled={busy}>
+                {busy ? "שומר..." : "שמירת סיסמה חדשה"}
+              </button>
+            </form>
+          </>
         ) : null}
 
-        {pageState === "link-ready" || pageState === "otp-ready" || pageState === "saving" ? (
-          <form onSubmit={submit} className="form-stack">
-            {isOtpFlow ? (
-              <>
-                <label>
-                  <span>אימייל מנהל</span>
-                  <input
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                    autoFocus
-                  />
-                </label>
-                <label>
-                  <span>קוד אימות מהמייל</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder="לדוגמה: 123456"
-                    value={token}
-                    onChange={(event) => setToken(event.target.value.replace(/\D/g, ""))}
-                    minLength={6}
-                    maxLength={8}
-                    required
-                  />
-                </label>
-              </>
-            ) : null}
-
-            <label>
-              <span>סיסמה חדשה</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                autoFocus={!isOtpFlow}
-              />
-            </label>
-            <label>
-              <span>אימות סיסמה חדשה</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                required
-              />
-            </label>
-            {error ? <p className="form-error">{error}</p> : null}
-            <button className="primary-button large" disabled={pageState === "saving"}>
-              {pageState === "saving" ? "מאמת ושומר…" : "שמירת הסיסמה החדשה"}
-            </button>
-            <a className="login-back-link" href="/">חזרה למסך הכניסה</a>
-          </form>
+        {done ? (
+          <>
+            <h2>הסיסמה עודכנה בהצלחה</h2>
+            <p className="helper-text">אפשר להיכנס למערכת עכשיו עם הסיסמה החדשה.</p>
+            <a
+              className="primary-button large"
+              style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 16 }}
+              href="/"
+            >
+              כניסה למערכת
+            </a>
+          </>
         ) : null}
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }
