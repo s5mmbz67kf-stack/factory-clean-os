@@ -234,6 +234,11 @@ textarea { resize: vertical; }
 
 .stats-grid { display: grid; gap: 16px; }
 .stats-grid.four { grid-template-columns: repeat(4, 1fr); }
+.stats-grid.three { grid-template-columns: repeat(3, 1fr); }
+
+/* כרטיס עובד אישי - היום/השבוע/החודש (חבילת FINANCE + VAT, סעיף 5) */
+.period-block + .period-block { margin-top: 18px; }
+.period-block-label { display: block; margin-bottom: 10px; }
 .stat-card { background: rgba(255,255,255,.92); border: 1px solid rgba(214,226,222,.9); border-radius: var(--radius); padding: 23px; box-shadow: 0 9px 30px rgba(20, 55, 51, .055); display: grid; gap: 9px; }
 .stat-card span { color: var(--muted); font-size: 14px; }
 .stat-card strong { font-size: clamp(23px, 2.4vw, 34px); letter-spacing: -.6px; }
@@ -314,9 +319,17 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .panel-title h3 { margin: 4px 0 0; font-size: 20px; }
 .panel-title > span { color: var(--muted); font-size: 12px; }
 .calculation-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; background: #e9f5f2; border-radius: 17px; padding: 13px; }
+.calculation-strip.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .calculation-strip div { background: rgba(255,255,255,.78); padding: 13px; border-radius: 12px; display: grid; gap: 6px; }
 .calculation-strip span { color: var(--muted); font-size: 11px; }
 .calculation-strip strong { font-size: 18px; }
+/* מע״מ מחושב על סמך המחיר, לא חלק מהחלוקה בין העובד לפקטורי - צבע עדין
+   שונה כדי להבדיל אותו חזותית מבלי להוסיף רכיב עיצובי חדש. */
+.calculation-strip .vat-cell strong { color: var(--gold); }
+/* עוטף את שני ה-calculation-strip (סיכום עבודה + חלוקת העבודה) בטופס
+   הוספת/עריכת עבודה, עם תווית קטנה בין השניים. */
+.calc-preview { display: grid; gap: 10px; }
+.calc-preview .calc-preview-label { margin: 0; }
 .modal-actions { display: flex; justify-content: flex-start; gap: 10px; padding-top: 2px; }
 
 .toast-stack { position: fixed; left: 22px; bottom: 22px; z-index: 60; display: grid; gap: 9px; }
@@ -348,10 +361,11 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
   .topbar h1 { font-size: 24px; }
   .page-content { padding: 18px; }
   .stats-grid.four { grid-template-columns: 1fr 1fr; }
+  .stats-grid.three { grid-template-columns: 1fr 1fr; }
   .hero-panel { align-items: flex-start; flex-direction: column; }
   .customer-grid, .employee-cards { grid-template-columns: 1fr; }
   .form-grid.three { grid-template-columns: 1fr 1fr; }
-  .calculation-strip { grid-template-columns: 1fr 1fr; }
+  .calculation-strip, .calculation-strip.cols-3 { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 560px) {
@@ -360,7 +374,7 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
   .topbar { align-items: flex-start; }
   .top-actions .primary-button { padding: 10px 12px; font-size: 12px; }
   .topbar .eyebrow { display: none; }
-  .stats-grid.four { grid-template-columns: 1fr; }
+  .stats-grid.four, .stats-grid.three { grid-template-columns: 1fr; }
   .toolbar-card { align-items: stretch; flex-direction: column; }
   .toolbar-card > select { width: 100%; }
   .modal-card { padding: 20px 15px; border-radius: 22px; }
@@ -369,7 +383,7 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
   .span-2 { grid-column: auto; }
   .segment-control.inline { min-width: 0; width: 100%; }
   .panel-title { align-items: flex-start; flex-direction: column; }
-  .calculation-strip { grid-template-columns: 1fr 1fr; }
+  .calculation-strip, .calculation-strip.cols-3 { grid-template-columns: 1fr 1fr; }
   .modal-actions { position: sticky; bottom: -20px; background: white; padding: 15px 0 5px; }
   .modal-actions button { flex: 1; }
   .toast-stack { left: 12px; right: 12px; bottom: 88px; }
