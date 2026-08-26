@@ -3,13 +3,14 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { createBrowserSupabase, workerEmailFromPhone } from "@/lib/supabase";
+import GrowthOS from "@/components/growth/growth-os";
 
 type Role = "admin" | "employee";
 type JobStatus = "pending" | "approved" | "completed" | "rejected" | "cancelled";
 type JobSource = "regular" | "midrag" | "owner";
 type PayMode = "percentage" | "fixed" | "none";
 type Consent = "unknown" | "approved" | "declined";
-type Tab = "dashboard" | "jobs" | "customers" | "employees" | "payments";
+type Tab = "dashboard" | "jobs" | "customers" | "employees" | "payments" | "growth";
 // Dashboard לבעל העסק (חבילת FINANCE + VAT, סעיף 6): "היום/השבוע/החודש/
 // השנה/הכול/טווח תאריכים" - כל הטווחים מצטברים מנקודת ההתחלה שלהם ועד עכשיו
 // (חוץ מ-range, שנסגר גם מלמעלה כשמוגדר "עד").
@@ -683,6 +684,7 @@ export default function FactoryCleanOS() {
     { id: "customers", label: "לקוחות", icon: "◎" },
     { id: "employees", label: "עובדים", icon: "♙", adminOnly: true },
     { id: "payments", label: "תשלומים", icon: "₪", adminOnly: true },
+    { id: "growth", label: "Growth", icon: "▲", adminOnly: true },
   ];
 
   return (
@@ -779,6 +781,8 @@ export default function FactoryCleanOS() {
         ) : null}
 
         {tab === "payments" && isAdmin ? <PaymentsView payments={payments} /> : null}
+
+        {tab === "growth" && isAdmin ? <GrowthOS supabase={supabase} isAdmin={isAdmin} /> : null}
       </main>
 
       {jobModal ? (

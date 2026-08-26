@@ -339,6 +339,26 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 .toast.info { background: #286b8a; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
+/* Growth OS - סרגל ניווט פנימי (מרכז שליטה / משפך / מקורות וכו').
+   כפתורים משתמשים באותם משתנים כמו שאר האתר (var(--teal)/var(--deep) לפעיל,
+   var(--line) למסגרת לא-פעילה) - אין כאן צבעים חדשים. */
+.growth-subnav { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.growth-subnav button {
+  white-space: nowrap;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 13.5px;
+}
+.growth-subnav button.active {
+  background: linear-gradient(135deg, var(--teal), var(--deep));
+  color: white;
+  border-color: transparent;
+}
+
 @media (max-width: 1150px) {
   .customer-grid, .employee-cards { grid-template-columns: repeat(2, 1fr); }
   .dashboard-grid { grid-template-columns: 1fr; }
