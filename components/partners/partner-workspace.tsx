@@ -37,7 +37,7 @@ export default function PartnerWorkspace({demo=false}:{demo?:boolean}) {
      if(body.action==='request'){
       const r=next.requests.find(r=>r.id===body.id)!;
       if(body.operation==='contact'){r.status='contacted';r.contacted_at=new Date().toISOString();}
-      if(body.operation==='confirm'){r.status='confirmed';r.scheduled_day=String(d.day);r.start_minute=Number(d.start);r.agreed_price=Number(d.price);}
+      if(body.operation==='confirm'){r.status='confirmed';r.scheduled_day=String(d.day);r.start_minute=Number(d.start);r.duration_minutes=Number(d.duration);r.agreed_price=Number(d.price);}
       if(body.operation==='complete'){r.status='completed';r.customer_paid=Boolean(d.paid);}
       if(body.operation==='paid')r.customer_paid=true;
       if(body.operation==='cancel')r.status='cancelled';if(body.operation==='reject')r.status='rejected';
@@ -72,8 +72,8 @@ export default function PartnerWorkspace({demo=false}:{demo?:boolean}) {
  if(loading)return <main className="loading-screen"><div className="brand-mark">F</div><p>טוען את אזור הטכנאים…</p></main>;
  if(!signedIn)return <Login onLogin={load} client={client!}/>;
  return <div className="pt-shell">
-  {demo?<div className="pt-demo"><strong>תצוגת הדגמה · כל הנתונים לדוגמה</strong><div><button onClick={()=>setDemoRole('admin')} aria-pressed={role==='admin'}>תצוגת מנהל</button><button onClick={()=>setDemoRole('technician')} aria-pressed={role==='technician'}>תצוגת טכנאי</button></div></div>:null}
-  <header className="pt-top"><Link href="/" className="brand-lockup"><div className="brand-mark">F</div><div><strong>Factory Clean</strong><span>אזור הטכנאים</span></div></Link><div className="pt-top-actions"><span>{data?.name}</span>{!demo?<button className="secondary-button" onClick={async()=>{await client!.auth.signOut();setData(null);setSignedIn(false);}}>יציאה</button>:null}</div></header>
+  {demo?<div className="pt-demo"><strong>תצוגת הדגמה · כל הנתונים לדוגמה</strong><div><button onClick={()=>{setDemoRole('admin');setSelected(null);}} aria-pressed={role==='admin'}>תצוגת מנהל</button><button onClick={()=>{setDemoRole('technician');setSelected(null);if(view==='settlement'||view==='setup')setView('requests');}} aria-pressed={role==='technician'}>תצוגת טכנאי</button></div></div>:null}
+  <header className="pt-top"><Link href="/" className="brand-lockup"><div className="brand-mark">F</div><div><strong>Factory Clean</strong><span>אזור הטכנאים</span></div></Link><div className="pt-top-actions"><span>{demo&&role==='technician'?partner?.name:data?.name}</span>{!demo?<button className="secondary-button" onClick={async()=>{await client!.auth.signOut();setData(null);setSignedIn(false);}}>יציאה</button>:null}</div></header>
   <main className="pt-main">
    <section className="pt-hero"><div><span className="eyebrow">{role==='admin'?'בקרה על העבודות שמגיעות דרכך':'העבודות שלך, מסודרות'}</span><h1>{role==='admin'?'תמונה מלאה. יום עבודה מסודר.':'מתאמים עם הלקוח. יוצאים לעבודה.'}</h1><p>{role==='admin'?'כל בקשה מהאתר, משיחת התיאום ועד להתחשבנות.':'בקשות חדשות, שעות פנויות וכל פרטי העבודה במקום אחד.'}</p></div><div className="pt-hero-number"><strong>{pending.length}</strong><span>בקשות לטיפול</span></div></section>
    {error?<div role="alert" className="form-error">{error}</div>:null}{notice?<div role="status" className="pt-notice">{notice}</div>:null}
