@@ -1,0 +1,10 @@
+'use client';
+import { useState } from 'react';
+import { createBrowserSupabase } from '@/lib/supabase';
+export default function CalendarConnection({demo}:{demo:boolean}){
+ const [url,setUrl]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[copied,setCopied]=useState(false);
+ async function action(method:'POST'|'DELETE'){
+  setBusy(true);setError('');try{const client=createBrowserSupabase();const {data}=await client.auth.getSession();const r=await fetch('/api/partner-calendar',{method,headers:{Authorization:`Bearer ${data.session?.access_token}`}});const b=await r.json();if(!r.ok)throw new Error(b.error);setUrl(b.url||'');setCopied(false);}catch(e){setError(e instanceof Error?e.message:'לא הצלחנו ליצור קישור.');}finally{setBusy(false);}
+ }
+ return <div className="pt-connection"><strong>יומן Google שלך</strong><span className="pt-badge pending">הוספת יומן באמצעות קישור</span><p>הבקשות והעבודות יופיעו ביומן נפרד. Google מרענן את המידע לפי התזמון שלו; השינויים מנוהלים במערכת.</p>{demo?<p>במערכת המלאה תוכל ליצור קישור אישי ולהוסיף אותו ל־Google Calendar.</p>:<><button className="secondary-button" disabled={busy} onClick={()=>void action('POST')}>יצירת קישור אישי חדש</button>{url?<div className="form-stack"><label><span>קישור היומן</span><input readOnly value={url} dir="ltr" onFocus={e=>e.currentTarget.select()}/></label><button className="small-button" onClick={async()=>{try{await navigator.clipboard.writeText(url);setCopied(true);}catch{setError('אפשר לבחור ולהעתיק את הקישור מהשדה.');}}}>{copied?'הקישור הועתק':'העתקת הקישור'}</button><p>ב־Google Calendar במחשב: ״יומנים אחרים״ ← ＋ ← ״מכתובת URL״, ואז הדבק את הקישור. זו הוספה חד־פעמית.</p></div>:null}<p>הקישור אישי. יצירת קישור חדש מבטלת את הקודם. היומן מציג שירות, עיר ומצב עבודה; פרטי הלקוחות נשארים בתוך המערכת.</p><button className="pt-text-button" disabled={busy} onClick={()=>void action('DELETE')}>ביטול הגישה דרך קישור היומן</button></>}{error?<p role="alert" className="form-error">{error}</p>:null}</div>;
+}

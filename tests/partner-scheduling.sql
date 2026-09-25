@@ -1,0 +1,47 @@
+-- Run as a trusted migration/test connection. Every fixture rolls back.
+begin;
+do $$
+declare owner_id uuid; tech_id uuid; pid uuid; other_pid uuid; req_id uuid; key1 uuid:=gen_random_uuid(); body jsonb; first_result jsonb; result jsonb; r public.partner_requests; day date:=(now() at time zone 'Asia/Jerusalem')::date+7; caught boolean; weekly jsonb;
+begin
+ select id into owner_id from public.profiles where role::text='admin' and active limit 1;
+ select id into tech_id from public.profiles where role::text='employee' and active limit 1;
+ if owner_id is null or tech_id is null then raise exception 'Test needs existing admin and employee profiles'; end if;
+ select jsonb_agg(jsonb_build_object('enabled',true,'start',540,'end',1020)) into weekly from generate_series(0,6);
+ insert into public.service_partners(user_id,name,phone,accepting,weekly,cities) values(tech_id,'QA rollback technician','0000000000',true,weekly,array['QA CITY']) returning id into pid;
+ insert into public.service_partners(user_id,name,phone,accepting,weekly,cities) values(owner_id,'QA other technician','0000000000',false,weekly,array['QA CITY']) returning id into other_pid;
+ assert not has_table_privilege('anon','public.partner_requests','select'),'PII exposed to anonymous';
+ assert not has_table_privilege('authenticated','public.partner_requests','select'),'PII table directly exposed';
+ assert not has_function_privilege('authenticated','public.partner_change_request(uuid,uuid,text,integer,jsonb)','execute'),'Mutation RPC exposed';
+ body:=jsonb_build_object('name','QA rollback customer','phone','0500000000','city','QA CITY','address','QA only','notes','','service','installation','day',day,'key',key1,'hash','test-hash');
+ first_result:=public.partner_submit_request(body);
+ assert first_result->>'status'='pending';
+ result:=public.partner_submit_request(body); assert first_result=result,'Retry duplicated request';
+ select * into r from public.partner_requests where idempotency_key=key1; req_id:=r.id;
+ assert r.start_minute=540,'First slot incorrect';
+ caught:=false; begin perform public.partner_submit_request(body||'{"hash":"different"}'); exception when others then if sqlerrm='IDEMPOTENCY_CONFLICT' then caught:=true;else raise;end if;end; assert caught,'Changed retry accepted';
+ perform public.partner_submit_request(body||jsonb_build_object('key',gen_random_uuid(),'hash','second'));
+ caught:=false;begin perform public.partner_submit_request(body||jsonb_build_object('key',gen_random_uuid(),'hash','third'));exception when others then if sqlerrm='DAY_UNAVAILABLE' then caught:=true;else raise;end if;end;assert caught,'Capacity overbooked';
+ caught:=false;begin perform public.partner_change_request(tech_id,req_id,'confirm',1,jsonb_build_object('day',day,'start',540,'price',1500,'customerConfirmed',true));exception when others then if sqlerrm='CONTACT_REQUIRED' then caught:=true;else raise;end if;end;assert caught,'Contact requirement bypassed';
+ perform public.partner_change_request(tech_id,req_id,'contact',1);
+ caught:=false;begin perform public.partner_change_request(tech_id,req_id,'contact',1);exception when others then if sqlerrm='STALE_VERSION' then caught:=true;else raise;end if;end;assert caught,'Stale action accepted';
+ perform public.partner_change_request(tech_id,req_id,'confirm',2,jsonb_build_object('day',day,'start',540,'price',1500,'customerConfirmed',true));
+ caught:=false;begin perform public.partner_schedule_change(tech_id,pid,'exception',jsonb_build_object('day',day,'closed',true,'start',540,'end',1020));exception when others then if sqlerrm='EXISTING_BOOKING' then caught:=true;else raise;end if;end;assert caught,'Confirmed work hidden by closing day';
+ caught:=false;begin perform public.partner_schedule_change(tech_id,pid,'block',jsonb_build_object('day',day,'start',540,'end',600));exception when others then if sqlerrm='EXISTING_BOOKING' then caught:=true;else raise;end if;end;assert caught,'Block overwrote booked time';
+ perform public.partner_change_request(tech_id,req_id,'complete',3,'{"paid":true}');
+ caught:=false;begin perform public.partner_change_request(tech_id,req_id,'settle',4);exception when others then if sqlerrm='FORBIDDEN' then caught:=true;else raise;end if;end;assert caught,'Technician settled owner commission';
+ perform public.partner_change_request(owner_id,req_id,'settle',4);
+ select * into r from public.partner_requests where id=req_id; assert r.commission_settled_at is not null; assert r.agreed_price*r.commission_rate=150;
+ assert (select count(*) from public.partner_request_events where request_id=req_id)=5,'History incomplete';
+ update public.partner_requests set partner_id=other_pid where id=req_id;
+ caught:=false;begin perform public.partner_change_request(tech_id,req_id,'contact',r.version);exception when others then if sqlerrm='FORBIDDEN' then caught:=true;else raise;end if;end;assert caught,'Cross-technician access allowed';
+ perform public.partner_schedule_change(tech_id,pid,'exception',jsonb_build_object('day',day+1,'closed',true,'start',540,'end',1020));
+ assert public.partner_find_slot(pid,day+1,90,30) is null,'Closed day shown available';
+ perform public.partner_schedule_change(tech_id,pid,'exception',jsonb_build_object('day',day+2,'closed',false,'start',780,'end',900));
+ assert public.partner_find_slot(pid,day+2,90,30)=780,'Custom hours ignored';
+ assert public.partner_find_slot(pid,day+2,180,30) is null,'Service longer than day accepted';
+ perform public.partner_schedule_change(tech_id,pid,'block',jsonb_build_object('day',day+2,'start',780,'end',810));
+ assert public.partner_find_slot(pid,day+2,90,30) is null,'Partial block ignored';
+ assert public.partner_rate_limit('QA_ROLLBACK',1,3600);assert not public.partner_rate_limit('QA_ROLLBACK',1,3600),'Rate limiter ignored';
+end $$;
+select 'PASS: capacity, retries, contact, conflicts, role isolation, schedule overrides, commission and audit' as result;
+rollback;

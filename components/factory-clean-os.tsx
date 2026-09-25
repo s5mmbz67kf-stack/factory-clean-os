@@ -695,6 +695,7 @@ export default function FactoryCleanOS() {
           <div><strong>Factory Clean</strong><span>OS</span></div>
         </div>
         <nav>
+          <a href="/partners" style={{display:"block",padding:"14px",textDecoration:"none",color:"inherit"}}>◷ טכנאים וזמינות</a>
           {navItems.filter((item) => !item.adminOnly || isAdmin).map((item) => (
             <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
               <span>{item.icon}</span>{item.label}
