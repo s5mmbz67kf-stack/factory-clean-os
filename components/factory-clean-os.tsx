@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import Link from "next/link";
 import { createBrowserSupabase, workerEmailFromPhone } from "@/lib/supabase";
 import GrowthOS from "@/components/growth/growth-os";
 
@@ -366,6 +367,7 @@ function LoginScreen({
           </button>
         </div>
 
+        <p className="helper-text"><Link href="/partners">טכנאי מזגנים? כניסה לאזור הטכנאים ←</Link></p>
         <form onSubmit={submit} className="form-stack">
           {mode === "admin" ? (
             <label>
@@ -379,11 +381,10 @@ function LoginScreen({
             </label>
           )}
           <label>
-            <span>{mode === "admin" ? "סיסמה" : "קוד אישי בן 4 ספרות"}</span>
+            <span>{mode === "admin" ? "סיסמה" : "קוד אישי או סיסמה"}</span>
             <input
               type="password"
-              inputMode={mode === "employee" ? "numeric" : "text"}
-              maxLength={mode === "employee" ? 4 : undefined}
+              maxLength={128}
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -459,6 +460,24 @@ export default function FactoryCleanOS() {
     }
 
     const typedProfile = profileData as Profile;
+    if (typedProfile.role === "employee" && typedProfile.active) {
+      try {
+        const destinationResponse = await fetch("/api/partners?destination=1", {
+          headers: { Authorization: `Bearer ${activeSession.access_token}` },
+          cache: "no-store",
+        });
+        if (destinationResponse.ok) {
+          const destination = await destinationResponse.json();
+          if (destination.destination === "/partners") {
+            setBooting(true);
+            window.location.replace("/partners");
+            return;
+          }
+        }
+      } catch {
+        toast("לא הצלחנו לבדוק את אזור הטכנאים. אפשר לפתוח אותו מתפריט המערכת.", "info");
+      }
+    }
     setProfile(typedProfile);
 
     const [employeesResult, customersResult, jobsResult, paymentsResult, employeeSummaryResult, customerSummaryResult] = await Promise.all([

@@ -5,6 +5,7 @@ const requestColumns='id,partner_id,reference,service,status,customer_name,phone
 export async function GET(req:NextRequest) {
  try {
   const {db,profile,admin,partnerId}=await staff(req);
+  if(req.nextUrl.searchParams.get('destination')==='1')return response({destination:admin?'/':'/partners'});
   let requestsQuery=db.from('partner_requests').select(requestColumns);
   let exceptionsQuery=db.from('partner_day_exceptions').select('*');
   let blocksQuery=db.from('partner_time_blocks').select('*');
