@@ -1010,7 +1010,7 @@ function Dashboard({
           <div className="approval-list">
             {pending.slice(0, 5).map((job) => (
               <article key={job.id}>
-                <div><strong>{job.customers?.customer_name || "לקוח ללא שם"}</strong><span>{job.employees?.name} · {job.service_type} · {money.format(job.gross_amount)}</span></div>
+                <div><strong>{job.customers?.customer_name || "לקוח ללא שם"}</strong><span>{job.employees?.name} · {job.service_type} · {money.format(job.total_with_vat)} כולל מע״מ</span></div>
                 <div className="row-actions">
                   <button className="small-button success" disabled={busy} onClick={() => onApprove(job.id)}>אישור</button>
                   <button className="small-button danger" disabled={busy} onClick={() => onReject(job.id)}>דחייה</button>
@@ -1083,7 +1083,7 @@ function JobsTable({ jobs, isAdmin, compact = false, onApprove, onComplete, onRe
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th>תאריך</th>{isAdmin ? <th>עובד</th> : null}<th>לקוח</th><th>שירות</th><th>סכום</th><th>אחוז</th><th>שכר עובד</th>{isAdmin ? <th>פקטורי</th> : null}<th>סטטוס</th>{!compact && isAdmin ? <th></th> : null}</tr></thead>
+        <thead><tr><th>תאריך</th>{isAdmin ? <th>עובד</th> : null}<th>לקוח</th><th>שירות</th><th>לפני מע״מ</th><th>מע״מ</th><th>לקוח שילם</th><th>אחוז</th><th>שכר עובד</th>{isAdmin ? <th>פקטורי</th> : null}<th>סטטוס</th>{!compact && isAdmin ? <th></th> : null}</tr></thead>
         <tbody>
           {jobs.map((job) => (
             <tr key={job.id}>
@@ -1092,6 +1092,8 @@ function JobsTable({ jobs, isAdmin, compact = false, onApprove, onComplete, onRe
               <td><strong>{job.customers?.business_name || job.customers?.customer_name || "ללא לקוח"}</strong><small>{job.city || ""}</small></td>
               <td>{job.service_type}<small>{SOURCE_LABELS[job.source]}</small></td>
               <td className="money-cell">{money.format(job.gross_amount)}</td>
+              <td className="money-cell">{money.format(job.vat_amount)}</td>
+              <td className="money-cell">{money.format(job.total_with_vat)}</td>
               <td>{job.rate_percent ?? 0}%</td>
               <td className="money-cell">{money.format(job.employee_pay)}</td>
               {isAdmin ? <td className="money-cell">{money.format(job.factory_net)}</td> : null}
@@ -1282,7 +1284,7 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
     grossAmount: "",
     directExpenses: "0",
     status: isAdmin ? "approved" : "pending",
-    vatEnabled: "false",
+    amountVatMode: "inclusive",
     vatRate: "18",
     payMode: "percentage",
     useDefaultRate: "true",
@@ -1338,17 +1340,26 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
 
   const selectedEmployee = employees.find((employee) => employee.id === form.employeeId);
   const calculatedRate = form.source === "owner" || form.payMode === "none" ? 0 : form.payMode === "fixed" ? 0 : form.useDefaultRate === "true" ? (form.source === "midrag" ? selectedEmployee?.midrag_rate || 0 : selectedEmployee?.regular_rate || 0) : safeNumber(form.ratePercent);
-  // employeePay ו-factoryNet ממשיכים להיגזר אך ורק מ-grossAmount (המחיר
-  // לפני מע״מ) - בדיוק כמו calculate_job_money() ב-DB. מע״מ מחושב בנפרד
-  // ולעולם לא נכנס לחישובים האלה, כפי שנדרש (סעיף 1: "המע״מ לא שייך
-  // להכנסת העובד ולא צריך להגדיל את Factory Net").
-  const employeePay = form.payMode === "fixed" ? safeNumber(form.fixedPay) : safeNumber(form.grossAmount) * calculatedRate / 100;
-  const factoryNet = safeNumber(form.grossAmount) - safeNumber(form.directExpenses) - employeePay;
-
-  const vatEnabled = form.vatEnabled === "true";
+  // המשתמש יכול להזין את המחיר כפי שסוכם עם הלקוח: כולל מע״מ או לפני
+  // מע״מ. בשני המצבים אנחנו ממירים אותו כאן לסכום לפני מע״מ, ורק אותו
+  // שולחים ל-gross_amount. כך calculate_job_money() ב-DB ממשיך להיות מקור
+  // האמת היחיד לשכר העובד ולנטו של פקטורי, והמע״מ לעולם לא מתחלק עם העובד.
+  const enteredAmount = safeNumber(form.grossAmount);
   const vatRate = safeNumber(form.vatRate);
-  const vatAmount = vatEnabled ? Math.round(safeNumber(form.grossAmount) * vatRate) / 100 : 0;
-  const totalWithVat = safeNumber(form.grossAmount) + vatAmount;
+  const amountIncludesVat = form.amountVatMode === "inclusive";
+  const vatMultiplier = 1 + vatRate / 100;
+  const amountBeforeVat = amountIncludesVat && vatMultiplier > 0
+    ? Math.round((enteredAmount / vatMultiplier) * 100) / 100
+    : enteredAmount;
+  const vatAmount = amountIncludesVat
+    ? Math.round((enteredAmount - amountBeforeVat) * 100) / 100
+    : Math.round((amountBeforeVat * vatRate / 100) * 100) / 100;
+  const totalWithVat = amountIncludesVat
+    ? enteredAmount
+    : Math.round((amountBeforeVat + vatAmount) * 100) / 100;
+
+  const employeePay = form.payMode === "fixed" ? safeNumber(form.fixedPay) : amountBeforeVat * calculatedRate / 100;
+  const factoryNet = amountBeforeVat - safeNumber(form.directExpenses) - employeePay;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -1388,11 +1399,11 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
         city: city || null,
         source,
         status: isAdmin ? form.status : "pending",
-        gross_amount: safeNumber(form.grossAmount),
+        gross_amount: amountBeforeVat,
         direct_expenses: safeNumber(form.directExpenses),
         // vat_amount / total_with_vat אינם נשלחים - הם עמודות generated
         // ב-DB, מחושבות אוטומטית מ-gross_amount + vat_enabled + vat_rate.
-        vat_enabled: vatEnabled,
+        vat_enabled: true,
         vat_rate: vatRate,
         pay_mode: payMode,
         use_default_rate: form.useDefaultRate === "true",
@@ -1439,18 +1450,19 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
           <label><span>שירות</span><select value={form.serviceType} onChange={(e) => setValue("serviceType", e.target.value)}>{SERVICE_OPTIONS.map((service) => <option key={service}>{service}</option>)}</select></label>
           <label><span>עיר העבודה</span><input placeholder="לדוגמה: רמת גן" value={form.city} onChange={(e) => setValue("city", e.target.value)} /></label>
           <label><span>סוג עבודה</span><select value={form.source} onChange={(e) => setValue("source", e.target.value)}><option value="regular">עבודה רגילה</option><option value="midrag">עבודה דרך מידרג</option>{isAdmin ? <option value="owner">עבודת בעלים — 0% עובד</option> : null}</select></label>
-          <label><span>סכום העבודה ₪ *</span><input type="number" min="0" step="0.01" value={form.grossAmount} onChange={(e) => setValue("grossAmount", e.target.value)} required /></label>
+          <label><span>{amountIncludesVat ? "סכום כולל מע״מ ₪ *" : "סכום לפני מע״מ ₪ *"}</span><input type="number" min="0" step="0.01" value={form.grossAmount} onChange={(e) => setValue("grossAmount", e.target.value)} required /></label>
           <label><span>הוצאות ישירות ₪</span><input type="number" min="0" step="0.01" value={form.directExpenses} onChange={(e) => setValue("directExpenses", e.target.value)} /></label>
           {isAdmin ? <label><span>סטטוס</span><select value={form.status} onChange={(e) => setValue("status", e.target.value)}><option value="pending">ממתינה לאישור</option><option value="approved">מאושרת</option><option value="completed">הושלמה</option></select></label> : null}
         </div>
 
         <div className="pay-settings">
-          <div className="panel-title"><div><span className="eyebrow">תמחור</span><h3>איך להציג את המחיר ללקוח?</h3></div></div>
+          <div className="panel-title"><div><span className="eyebrow">תמחור</span><h3>הסכום שהזנתי הוא:</h3></div></div>
           <div className="segment-control inline">
-            <button type="button" className={!vatEnabled ? "active" : ""} onClick={() => setValue("vatEnabled", "false")}>מחיר ללא מע״מ</button>
-            <button type="button" className={vatEnabled ? "active" : ""} onClick={() => setValue("vatEnabled", "true")}>+ מע״מ</button>
+            <button type="button" className={amountIncludesVat ? "active" : ""} onClick={() => setValue("amountVatMode", "inclusive")}>כולל מע״מ</button>
+            <button type="button" className={!amountIncludesVat ? "active" : ""} onClick={() => setValue("amountVatMode", "exclusive")}>לפני מע״מ</button>
           </div>
-          {vatEnabled ? <label><span>שיעור מע״מ %</span><input type="number" min="0" max="100" step="0.1" value={form.vatRate} onChange={(e) => setValue("vatRate", e.target.value)} /></label> : null}
+          <p className="helper-text">ב״כולל מע״מ״ המערכת מחלצת את המע״מ מהסכום. ב״לפני מע״מ״ המערכת מוסיפה אותו לסכום שהלקוח משלם. שכר העובד מחושב תמיד מהמחיר לפני מע״מ.</p>
+          <label><span>שיעור מע״מ %</span><input type="number" min="0" max="100" step="0.1" value={form.vatRate} onChange={(e) => setValue("vatRate", e.target.value)} /></label>
         </div>
 
         {isAdmin && form.source !== "owner" ? <div className="pay-settings"><div className="panel-title"><div><span className="eyebrow">חישוב עובד</span><h3>לפי מה לחשב?</h3></div></div><div className="form-grid three"><label><span>שיטת תשלום</span><select value={form.payMode} onChange={(e) => setValue("payMode", e.target.value)}><option value="percentage">אחוז</option><option value="fixed">סכום קבוע</option><option value="none">ללא שכר</option></select></label>{form.payMode === "percentage" ? <><label><span>אחוז</span><select value={form.useDefaultRate} onChange={(e) => setValue("useDefaultRate", e.target.value)}><option value="true">האחוז שהוגדר לעובד</option><option value="false">אחוז מיוחד לעבודה</option></select></label>{form.useDefaultRate === "false" ? <label><span>אחוז מיוחד</span><input type="number" min="0" max="100" step="0.1" value={form.ratePercent} onChange={(e) => setValue("ratePercent", e.target.value)} /></label> : null}</> : null}{form.payMode === "fixed" ? <label><span>סכום קבוע לעובד</span><input type="number" min="0" value={form.fixedPay} onChange={(e) => setValue("fixedPay", e.target.value)} /></label> : null}</div></div> : null}
@@ -1460,8 +1472,8 @@ function JobFormModal({ supabase, profile, currentEmployee, employees, customers
         <div className="calc-preview">
           <p className="helper-text calc-preview-label">סיכום עבודה</p>
           <div className="calculation-strip cols-3">
-            <div><span>מחיר עבודה</span><strong>{money.format(safeNumber(form.grossAmount))}</strong></div>
-            <div className="vat-cell"><span>{vatEnabled ? `מע״מ (${vatRate}%)` : "מע״מ"}</span><strong>{money.format(vatAmount)}</strong></div>
+            <div><span>לפני מע״מ</span><strong>{money.format(amountBeforeVat)}</strong></div>
+            <div className="vat-cell"><span>{`מע״מ (${vatRate}%)`}</span><strong>{money.format(vatAmount)}</strong></div>
             <div><span>לקוח משלם</span><strong>{money.format(totalWithVat)}</strong></div>
           </div>
           <p className="helper-text calc-preview-label">חלוקת העבודה</p>
