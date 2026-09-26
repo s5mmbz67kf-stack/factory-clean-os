@@ -10,6 +10,7 @@ export async function GET(req:NextRequest) {
   }
   const from=req.nextUrl.searchParams.get('from') || dateInIsrael();
   const service=req.nextUrl.searchParams.get('service') || 'installation';
+  if(service==='ac_cleaning') throw new ApiError(400,'להזמנת ניקוי מזגן עברו לטופס הניקיון באתר Factory Clean.');
   const city=str(req.nextUrl.searchParams.get('city'),80);
   if(!validDay(from)||from<dateInIsrael()||from>addDays(dateInIsrael(),62)||!(service in SERVICES)||city.length<2) throw new ApiError(400,'בחרו שירות ועיר תקינים.');
   const {data,error}=await dbClient().rpc('partner_available_days',{p_from:from,p_to:addDays(from,27),p_service:service,p_city:city});

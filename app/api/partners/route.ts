@@ -55,7 +55,7 @@ export async function POST(req:NextRequest) {
    if(operation==='settings') {
     const weekly=data.weekly as {enabled:boolean;start:number;end:number}[];
     const durations=data.durations as Record<string,number>;
-    if(!Array.isArray(data.services)||!data.services.length||data.services.length>4||data.services.some(s=>typeof s!=='string'||!Object.hasOwn(SERVICES,s)))throw new ApiError(400,'בחרו לפחות שירות אחד.');
+    if(!Array.isArray(data.services)||!data.services.length||data.services.length>4||data.services.some(s=>typeof s!=='string'||!Object.hasOwn(SERVICES,s)||s==='ac_cleaning'))throw new ApiError(400,'בחרו לפחות שירות אחד.');
     if(!Array.isArray(weekly)||weekly.length!==7||weekly.some(h=>typeof h.enabled!=='boolean'||!Number.isInteger(h.start)||!Number.isInteger(h.end)||h.start<0||h.end>1440||h.start>=h.end)||!durations||Object.keys(SERVICES).some(s=>!Number.isInteger(durations[s])||durations[s]<15||durations[s]>720)||!Number.isInteger(data.buffer_minutes)||Number(data.buffer_minutes)<0||Number(data.buffer_minutes)>180||typeof data.accepting!=='boolean'||!Array.isArray(data.cities)||data.cities.length>100||data.cities.some(c=>typeof c!=='string'||c.length<2||c.length>80)) throw new ApiError(400,'בדקו את שעות העבודה ואת משך השירותים.');
     if(data.accepting && (!weekly.some(h=>h.enabled)||data.cities.length===0)) throw new ApiError(400,'כדי לפתוח הזמנות צריך לבחור ימי עבודה וערי שירות.');
    }else if(['exception','block'].includes(operation)) {

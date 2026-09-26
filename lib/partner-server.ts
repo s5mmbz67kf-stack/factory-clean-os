@@ -53,6 +53,7 @@ export function uuid(v: unknown) { const s=str(v,36); if(!/^[0-9a-f]{8}-[0-9a-f]
 export function bookingInput(body: Record<string,unknown>) {
   const name=str(body.name,100), phone=normalizePhone(str(body.phone,30)), city=str(body.city,80), address=str(body.address,200), notes=str(body.notes,1200), service=str(body.service), day=str(body.day,10), key=uuid(body.key);
   if(name.length<2 || !/^0(?:5\d{8}|[23489]\d{7})$/.test(phone) || city.length<2 || address.length<3 || !(service in SERVICES) || !validDay(day) || day<dateInIsrael() || day>addDays(dateInIsrael(),90) || body.consent!==true) throw new ApiError(400,'נא למלא פרטי קשר, כתובת ויום תקינים ולאשר העברת הפרטים לטכנאי.');
+  if(service==='ac_cleaning') throw new ApiError(400,'ניקוי מזגן מבוצע על ידי איציק. הזמינו דרך טופס הניקיון באתר Factory Clean.');
   const payload={name,phone,city,address,notes,service,day,key};
   return {...payload, hash:createHash('sha256').update(JSON.stringify(payload)).digest('hex')};
 }
