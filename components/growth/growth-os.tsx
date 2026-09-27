@@ -157,6 +157,36 @@ type Insight = {
   created_at: string;
 };
 
+type AgentRun = {
+  id: string;
+  trigger: "manual" | "scheduled";
+  status: "running" | "completed" | "failed" | "skipped";
+  executive_summary: string | null;
+  insights_created: number;
+  actions_created: number;
+  approvals_created: number;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+};
+
+type AgentApproval = {
+  id: string;
+  action_type: string;
+  title: string;
+  rationale: string;
+  expected_impact: string | null;
+  risk_level: "low" | "medium" | "high";
+  status: "pending" | "approved" | "rejected" | "executed" | "failed";
+  created_at: string;
+};
+
+type AgentSettings = {
+  enabled: boolean;
+  autonomy_level: "observe" | "balanced" | "aggressive";
+  max_actions_per_run: number;
+};
+
 type GrowthSubTab =
   | "command_center" | "funnel" | "sources" | "data_health"
   | "actions" | "experiments" | "campaigns" | "profitability" | "ai_insights";
@@ -1300,15 +1330,77 @@ function LinkBookingModal({ supabase, bookingRef, jobs, onClose, onSaved }: {
 }
 
 // ---------------------------------------------------------------------------
-// AI Insights (section 11) — deterministic rules only, no LLM call in V1
-// (master build doc: "deterministic insight rules should work first").
+// Growth AI agent — deterministic safety net plus a proactive, data-fed agent.
 // ---------------------------------------------------------------------------
 
 function AIInsightsView({ supabase, insights, events, links, jobById, reload }: {
   supabase: SupabaseClient; insights: Insight[]; events: GrowthEvent[]; links: BookingJobLink[]; jobById: Map<string, GrowthJob>; reload: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [agentError, setAgentError] = useState("");
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [approvals, setApprovals] = useState<AgentApproval[]>([]);
+  const [settings, setSettings] = useState<AgentSettings>({ enabled: true, autonomy_level: "balanced", max_actions_per_run: 5 });
   const computed = useMemo(() => computeDeterministicInsights(events, links), [events, links]);
+
+  const loadAgentData = useCallback(async () => {
+    const [runsResult, approvalsResult, settingsResult] = await Promise.all([
+      supabase.from("growth_agent_runs").select("id,trigger,status,executive_summary,insights_created,actions_created,approvals_created,error_message,started_at,completed_at").order("started_at", { ascending: false }).limit(12),
+      supabase.from("growth_agent_approvals").select("id,action_type,title,rationale,expected_impact,risk_level,status,created_at").order("created_at", { ascending: false }).limit(50),
+      supabase.from("growth_agent_settings").select("enabled,autonomy_level,max_actions_per_run").eq("id", true).single(),
+    ]);
+    setRuns((runsResult.data || []) as AgentRun[]);
+    setApprovals((approvalsResult.data || []) as AgentApproval[]);
+    if (settingsResult.data) setSettings(settingsResult.data as AgentSettings);
+  }, [supabase]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadAgentData(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAgentData]);
+
+  async function runAgent() {
+    setBusy(true); setAgentError("");
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) throw new Error("ההתחברות פגה. יש להיכנס שוב.");
+      const response = await fetch("/api/growth-agent", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${data.session.access_token}` },
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "הרצת הסוכן נכשלה.");
+      await Promise.all([reload(), loadAgentData()]);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "הרצת הסוכן נכשלה.");
+    } finally { setBusy(false); }
+  }
+
+  async function updateSettings(patch: Partial<AgentSettings>) {
+    setBusy(true); setAgentError("");
+    const next = { ...settings, ...patch };
+    const { error } = await supabase.from("growth_agent_settings").update(next).eq("id", true);
+    if (error) setAgentError(error.message); else setSettings(next);
+    setBusy(false);
+  }
+
+  async function decideApproval(item: AgentApproval, decision: "approved" | "rejected") {
+    setBusy(true); setAgentError("");
+    const { data: auth } = await supabase.auth.getUser();
+    const { error } = await supabase.from("growth_agent_approvals").update({
+      status: decision, decided_by: auth.user?.id || null, decided_at: new Date().toISOString(),
+    }).eq("id", item.id).eq("status", "pending");
+    if (!error && decision === "approved") {
+      await supabase.from("growth_actions").insert({
+        title: item.title, type: "do_now", priority: item.risk_level === "high" ? 1 : 2,
+        status: "open", expected_impact: item.expected_impact,
+        notes: `${item.rationale}\nאושר על ידי יצחק. ביצוע חיצוני יתבצע רק לאחר חיבור הערוץ המתאים.`,
+      });
+    }
+    if (error) setAgentError(error.message);
+    await Promise.all([reload(), loadAgentData()]);
+    setBusy(false);
+  }
 
   async function persistAndCreateAction(finding: typeof computed[number]) {
     setBusy(true);
@@ -1333,8 +1425,52 @@ function AIInsightsView({ supabase, insights, events, links, jobById, reload }: 
 
   return (
     <div className="page-content" style={{ padding: 0 }}>
+      <section className="agent-hero">
+        <div>
+          <span className="eyebrow">Factory Growth AI</span>
+          <h2>מנהל הצמיחה שלא מחכה שתשאל</h2>
+          <p>קורא ביצועי אתר ועסק, מזהה מה בוער, יוצר פעולות ומעלה לאישור כל שינוי רגיש.</p>
+        </div>
+        <div className="agent-hero-actions">
+          <Pill tone={settings.enabled ? "green" : "neutral"}>{settings.enabled ? "פעיל" : "כבוי"}</Pill>
+          <button className="primary-button light" disabled={busy || !settings.enabled} onClick={runAgent}>{busy ? "מנתח…" : "הרץ ניתוח עכשיו"}</button>
+        </div>
+      </section>
+
+      {agentError ? <p className="form-error">{agentError}</p> : null}
+
+      <div className="agent-control-grid">
+        <section className="section-card">
+          <div className="section-title"><div><span className="eyebrow">שליטה</span><h2>רמת עצמאות</h2></div></div>
+          <label className="agent-toggle"><span>הסוכן פעיל</span><input type="checkbox" checked={settings.enabled} disabled={busy} onChange={(e) => updateSettings({ enabled: e.target.checked })} /></label>
+          <label><span>מצב עבודה</span><select value={settings.autonomy_level} disabled={busy} onChange={(e) => updateSettings({ autonomy_level: e.target.value as AgentSettings["autonomy_level"] })}>
+            <option value="observe">צופה בלבד — תובנות ללא משימות</option>
+            <option value="balanced">מאוזן — משימות פנימיות, אישור לחיצוני</option>
+            <option value="aggressive">על קוצים — יוזם יותר, אישור לחיצוני</option>
+          </select></label>
+          <p className="helper-text">גם במצב “על קוצים” הסוכן לא משנה תקציב, קמפיין, אתר או הודעה ללקוח בלי אישור שלך.</p>
+        </section>
+        <section className="section-card">
+          <div className="section-title"><div><span className="eyebrow">ריצה אחרונה</span><h2>{runs[0] ? formatDateTime(runs[0].started_at) : "עדיין לא רץ"}</h2></div></div>
+          {runs[0] ? <>
+            <p className="agent-summary">{runs[0].executive_summary || (runs[0].status === "running" ? "מנתח כרגע את הנתונים…" : runs[0].error_message || "לא נוצר תקציר.")}</p>
+            <div className="agent-run-counts"><span>{runs[0].insights_created} תובנות</span><span>{runs[0].actions_created} פעולות</span><span>{runs[0].approvals_created} אישורים</span></div>
+          </> : <GEmpty>לחצו “הרץ ניתוח עכשיו” כדי להתחיל.</GEmpty>}
+        </section>
+      </div>
+
+      <section className="section-card attention-card">
+        <div className="section-title"><div><span className="eyebrow">ממתין לך</span><h2>אישורים לפעולות רגישות</h2></div><Pill tone={approvals.some((a) => a.status === "pending") ? "yellow" : "green"}>{approvals.filter((a) => a.status === "pending").length} ממתינים</Pill></div>
+        {approvals.some((a) => a.status === "pending") ? <div className="approval-list">
+          {approvals.filter((a) => a.status === "pending").map((item) => <article key={item.id}>
+            <div><strong>{item.title}</strong><span>{item.rationale}{item.expected_impact ? ` · השפעה צפויה: ${item.expected_impact}` : ""}</span></div>
+            <div className="row-actions"><button className="small-button success" disabled={busy} onClick={() => decideApproval(item, "approved")}>אישור</button><button className="small-button danger" disabled={busy} onClick={() => decideApproval(item, "rejected")}>דחייה</button></div>
+          </article>)}
+        </div> : <GEmpty>אין כרגע פעולות רגישות שממתינות לאישור.</GEmpty>}
+      </section>
+
       <section className="section-card">
-        <div className="section-title"><div><span className="eyebrow">תובנות חדשות</span><h2>מבוססות כללים, לא LLM (V1)</h2></div></div>
+        <div className="section-title"><div><span className="eyebrow">רשת ביטחון</span><h2>בדיקות אוטומטיות קבועות</h2></div></div>
         {computed.length ? (
           <div className="employee-summary-list">
             {computed.map((f, i) => (
@@ -1345,7 +1481,7 @@ function AIInsightsView({ supabase, insights, events, links, jobById, reload }: 
               </article>
             ))}
           </div>
-        ) : <GEmpty>אין עדיין מספיק נתונים כדי לייצר תובנות. חוזרים לכאן ברגע שיצטברו יותר אירועים.</GEmpty>}
+        ) : <GEmpty>לא זוהתה כרגע חריגה בכללי הבטיחות הקבועים.</GEmpty>}
       </section>
 
       {insights.length ? (

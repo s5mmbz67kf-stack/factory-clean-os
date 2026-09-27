@@ -129,6 +129,17 @@ textarea { resize: vertical; }
 .form-error { color: var(--danger); background: #fff0f0; border-radius: 10px; padding: 11px 13px; margin: 0; }
 .helper-text { margin: 0; background: var(--soft); color: var(--muted); padding: 14px; border-radius: 12px; line-height: 1.55; }
 
+.agent-hero { min-height: 210px; padding: clamp(26px, 4vw, 46px); border-radius: 28px; color: white; background: radial-gradient(circle at 10% 10%, rgba(202,164,94,.26), transparent 30%), linear-gradient(130deg, #083d3f, #0d777a); box-shadow: var(--shadow); display: flex; align-items: center; justify-content: space-between; gap: 28px; }
+.agent-hero h2 { margin: 8px 0; font-size: clamp(28px, 3vw, 43px); }
+.agent-hero p { margin: 0; max-width: 690px; color: rgba(255,255,255,.75); font-size: 17px; line-height: 1.6; }
+.agent-hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.agent-control-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 22px; }
+.agent-toggle { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; }
+.agent-toggle input { width: 22px; height: 22px; accent-color: var(--teal); }
+.agent-summary { font-size: 17px; line-height: 1.7; margin: 0; color: var(--ink); }
+.agent-run-counts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.agent-run-counts span { background: var(--soft); color: var(--deep); padding: 8px 11px; border-radius: 999px; font-size: 13px; font-weight: 800; }
+
 .primary-button, .secondary-button, .small-button {
   border: 0;
   border-radius: 12px;
@@ -365,6 +376,9 @@ td small { display: block; color: var(--muted); margin-top: 4px; }
 }
 
 @media (max-width: 850px) {
+  .agent-hero { align-items: flex-start; flex-direction: column; }
+  .agent-hero-actions { justify-content: flex-start; }
+  .agent-control-grid { grid-template-columns: 1fr; }
   .login-page { grid-template-columns: 1fr; }
   .login-copy { min-height: 42vh; padding: 42px 26px; }
   .login-copy h1 { margin: 52px 0 14px; }
