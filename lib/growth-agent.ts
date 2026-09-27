@@ -1,4 +1,4 @@
-import { Output, ToolLoopAgent, isStepCount, tool } from "ai";
+import { ToolLoopAgent, isStepCount, tool } from "ai";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -130,13 +130,6 @@ function buildAgent(db: SupabaseClient, runId: string, settings: AgentSettings, 
 8. תן פעולות ממוקדות: מה לעשות, למה, איזה מדד יוכיח הצלחה ובאיזה טווח זמן.
 9. כתוב בעברית קצרה, ישירה ועסקית.`,
     stopWhen: isStepCount(8),
-    output: Output.object({
-      schema: z.object({
-        executiveSummary: z.string().min(20).max(1200),
-        health: z.enum(["good", "attention", "critical"]),
-        topPriority: z.string().min(5).max(300),
-      }),
-    }),
     tools: {
       saveInsight: tool({
         description: "שמור תובנה עסקית חדשה שנתמכת בראיות מספריות",
@@ -236,12 +229,13 @@ export async function runGrowthAgent(db: SupabaseClient, trigger: Trigger) {
     const result = await agent.generate({
       prompt: `נתח את תמונת המצב הבאה. שמור תובנות ופתח פעולות רק כאשר הראיות מצדיקות זאת. בסיום החזר תקציר מנהלים ועדיפות אחת עליונה.\n\n${JSON.stringify(snapshot)}`,
     });
+    const executiveSummary = result.text.trim().slice(0, 1200) || "הניתוח הושלם ונשמרו הממצאים הרלוונטיים.";
     await db.from("growth_agent_runs").update({
-      status: "completed", executive_summary: result.output.executiveSummary,
+      status: "completed", executive_summary: executiveSummary,
       insights_created: counters.insights, actions_created: counters.actions,
       approvals_created: counters.approvals, completed_at: new Date().toISOString(),
     }).eq("id", run.id);
-    return { runId: run.id, status: "completed" as const, ...result.output, ...counters };
+    return { runId: run.id, status: "completed" as const, executiveSummary, ...counters };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown agent error";
     await db.from("growth_agent_runs").update({ status: "failed", error_message: message.slice(0, 1000), completed_at: new Date().toISOString() }).eq("id", run.id);
