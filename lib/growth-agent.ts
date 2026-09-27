@@ -115,7 +115,7 @@ async function buildSnapshot(db: SupabaseClient) {
 
 function buildAgent(db: SupabaseClient, runId: string, settings: AgentSettings, counters: { insights: number; actions: number; approvals: number }) {
   return new ToolLoopAgent({
-    model: "openai/gpt-6-sol",
+    model: "inclusionai/ling-3.0-flash-sante-free",
     instructions: `אתה מנהל הצמיחה האקטיבי של Factory Clean, עסק ישראלי לשירותי ניקוי מקצועיים.
 המטרה שלך היא להגדיל הזמנות מאושרות ורווח נקי, תוך שמירה על אמינות הנתונים והמותג.
 
