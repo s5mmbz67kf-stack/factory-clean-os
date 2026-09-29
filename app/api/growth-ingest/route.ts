@@ -42,6 +42,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import { normalizeGrowthEventOrigin } from "@/lib/growth-analytics";
 import { insertGrowthEvent, type GrowthEventRow } from "@/lib/growthSupabase";
 
 const ALLOWED_EVENT_NAMES = new Set([
@@ -58,8 +59,6 @@ const ALLOWED_EVENT_NAMES = new Set([
   "job_completed",
   "revenue_recorded",
 ]);
-
-const ALLOWED_EVENT_ORIGINS = new Set(["web", "os", "system"]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -124,8 +123,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing session_id or anonymous_id" }, { status: 400 });
     }
 
-    const eventOriginRaw = str(body.event_origin);
-    const eventOrigin = eventOriginRaw && ALLOWED_EVENT_ORIGINS.has(eventOriginRaw) ? eventOriginRaw : "web";
+    const eventOrigin = normalizeGrowthEventOrigin(str(body.event_origin));
 
     // customer_id / job_id are NEVER read from the request body, even if
     // present - Sprint 1 does not accept a caller-asserted link to Factory

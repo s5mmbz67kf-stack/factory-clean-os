@@ -26,6 +26,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildFunnelStageRows, preparePrimaryAnalyticsEvents, type GrowthEventOrigin } from "@/lib/growth-analytics";
 
 // ---------------------------------------------------------------------------
 // Types — column-exact to migration-003-growth.sql.
@@ -40,7 +41,7 @@ type GrowthEvent = {
   id: string;
   client_event_id: string;
   event_name: EventName;
-  event_origin: "web" | "server";
+  event_origin: GrowthEventOrigin;
   session_id: string;
   anonymous_id: string;
   page_path: string | null;
@@ -371,9 +372,10 @@ export default function GrowthOS({ supabase, isAdmin }: { supabase: SupabaseClie
   useEffect(() => { if (isAdmin) void loadAll(); }, [isAdmin, loadAll]);
 
   const range = useMemo(() => periodRange(period, customFrom, customTo), [period, customFrom, customTo]);
+  const analyticsEvents = useMemo(() => preparePrimaryAnalyticsEvents(events), [events]);
   const periodEvents = useMemo(
-    () => events.filter((e) => { const t = new Date(e.occurred_at); return t >= range.from && t <= range.to; }),
-    [events, range],
+    () => analyticsEvents.filter((e) => { const t = new Date(e.occurred_at); return t >= range.from && t <= range.to; }),
+    [analyticsEvents, range],
   );
   const linkByRef = useMemo(() => {
     const map = new Map<string, BookingJobLink>();
@@ -421,19 +423,19 @@ export default function GrowthOS({ supabase, isAdmin }: { supabase: SupabaseClie
         <>
           {subTab === "command_center" ? (
             <CommandCenterView
-              periodEvents={periodEvents} allEvents={events} range={range} period={period} setPeriod={setPeriod}
+              periodEvents={periodEvents} allEvents={analyticsEvents} range={range} period={period} setPeriod={setPeriod}
               customFrom={customFrom} customTo={customTo} setCustomFrom={setCustomFrom} setCustomTo={setCustomTo}
               linkByRef={linkByRef} jobById={jobById} campaignMetrics={campaignMetrics} actions={actions}
             />
           ) : null}
-          {subTab === "funnel" ? <FunnelView periodEvents={periodEvents} allEvents={events} linkByRef={linkByRef} jobById={jobById} /> : null}
+          {subTab === "funnel" ? <FunnelView periodEvents={periodEvents} allEvents={analyticsEvents} linkByRef={linkByRef} jobById={jobById} /> : null}
           {subTab === "sources" ? <SourcesView periodEvents={periodEvents} linkByRef={linkByRef} jobById={jobById} /> : null}
           {subTab === "data_health" ? <DataHealthView events={events} links={links} /> : null}
           {subTab === "actions" ? <ActionsView supabase={supabase} actions={actions} insights={insights} reload={loadAll} /> : null}
           {subTab === "experiments" ? <ExperimentsView supabase={supabase} experiments={experiments} reload={loadAll} /> : null}
-          {subTab === "campaigns" ? <CampaignsView supabase={supabase} campaigns={campaigns} campaignMetrics={campaignMetrics} events={events} linkByRef={linkByRef} jobById={jobById} reload={loadAll} /> : null}
-          {subTab === "profitability" ? <ProfitabilityView supabase={supabase} jobs={jobs} links={links} events={events} reload={loadAll} /> : null}
-          {subTab === "ai_insights" ? <AIInsightsView supabase={supabase} insights={insights} events={events} links={links} jobById={jobById} reload={loadAll} /> : null}
+          {subTab === "campaigns" ? <CampaignsView supabase={supabase} campaigns={campaigns} campaignMetrics={campaignMetrics} events={analyticsEvents} linkByRef={linkByRef} jobById={jobById} reload={loadAll} /> : null}
+          {subTab === "profitability" ? <ProfitabilityView supabase={supabase} jobs={jobs} links={links} events={analyticsEvents} reload={loadAll} /> : null}
+          {subTab === "ai_insights" ? <AIInsightsView supabase={supabase} insights={insights} events={analyticsEvents} links={links} jobById={jobById} reload={loadAll} /> : null}
         </>
       )}
     </div>
@@ -647,28 +649,12 @@ function groupByService(periodEvents: GrowthEvent[], linkByRef: Map<string, Book
 // Funnel (section 3)
 // ---------------------------------------------------------------------------
 
-const FUNNEL_STAGES: { name: EventName; label: string }[] = [
-  { name: "page_view", label: "כניסות לאתר" },
-  { name: "service_view", label: "צפייה בשירות" },
-  { name: "price_view", label: "צפייה במחיר" },
-  { name: "booking_started", label: "התחלת הזמנה" },
-  { name: "booking_step_completed", label: "התקדמות בהזמנה" },
-  { name: "booking_submitted", label: "הזמנה נשלחה" },
-  { name: "booking_confirmed", label: "הזמנה אושרה" },
-];
-
 function FunnelView({ periodEvents, allEvents, linkByRef, jobById }: {
   periodEvents: GrowthEvent[]; allEvents: GrowthEvent[]; linkByRef: Map<string, BookingJobLink>; jobById: Map<string, GrowthJob>;
 }) {
   const [lookupRef, setLookupRef] = useState("");
 
-  const stageCounts = useMemo(() => {
-    return FUNNEL_STAGES.map((stage) => {
-      const rows = periodEvents.filter((e) => e.event_name === stage.name);
-      const uniqueSessions = new Set(rows.map((e) => e.session_id)).size;
-      return { ...stage, sessions: uniqueSessions };
-    });
-  }, [periodEvents]);
+  const stageCounts = useMemo(() => buildFunnelStageRows(periodEvents), [periodEvents]);
 
   const journeyResults = useMemo(() => {
     if (!lookupRef.trim()) return [];
@@ -691,7 +677,7 @@ function FunnelView({ periodEvents, allEvents, linkByRef, jobById }: {
                 const prev = i > 0 ? stageCounts[i - 1].sessions : stage.sessions;
                 const conv = i === 0 ? 1 : safeDiv(stage.sessions, prev);
                 return (
-                  <tr key={stage.name}>
+                  <tr key={stage.key}>
                     <td>{stage.label}</td>
                     <td className="money-cell">{number.format(stage.sessions)}</td>
                     <td>{i === 0 ? "—" : pct(conv)}</td>
@@ -1505,7 +1491,7 @@ function computeDeterministicInsights(events: GrowthEvent[], links: BookingJobLi
   }[] = [];
 
   // Rule 1: biggest funnel drop between consecutive stages.
-  const stageCounts = FUNNEL_STAGES.map((s) => ({ label: s.label, sessions: new Set(events.filter((e) => e.event_name === s.name).map((e) => e.session_id)).size }));
+  const stageCounts = buildFunnelStageRows(events);
   let worstDrop = { from: "", to: "", rate: 0 };
   for (let i = 1; i < stageCounts.length; i++) {
     const prev = stageCounts[i - 1].sessions;

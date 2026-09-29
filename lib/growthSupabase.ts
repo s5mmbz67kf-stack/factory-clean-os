@@ -36,6 +36,7 @@
 // marketing site repo and as create-employee/route.ts itself.
 
 import { createClient } from "@supabase/supabase-js";
+import type { GrowthEventOrigin } from "@/lib/growth-analytics";
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -60,7 +61,7 @@ function getAdminClient() {
 export type GrowthEventRow = {
   client_event_id: string;
   event_name: string;
-  event_origin: string;
+  event_origin: GrowthEventOrigin;
   session_id: string;
   anonymous_id: string;
   page_path: string | null;
