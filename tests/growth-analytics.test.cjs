@@ -3,10 +3,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildFunnelStageRows,
+  canonicalizeTrafficSource,
   filterPrimaryAnalyticsEvents,
   inheritBookingConfirmationAttribution,
   normalizeGrowthEventOrigin,
 } = require('../.test-build/growth-analytics.js');
+
+test('canonicalizes common Google, Meta and WhatsApp source variants', () => {
+  assert.equal(canonicalizeTrafficSource('www.google.com'), 'google');
+  assert.equal(canonicalizeTrafficSource('com.google.android.googlequicksearchbox'), 'google');
+  assert.equal(canonicalizeTrafficSource('m.facebook.com'), 'facebook');
+  assert.equal(canonicalizeTrafficSource('ig'), 'instagram');
+  assert.equal(canonicalizeTrafficSource('l.wl.co'), 'whatsapp');
+  assert.equal(canonicalizeTrafficSource('www.example.co.il'), 'example.co.il');
+});
 
 test('normalizes legacy server origin to the database system value', () => {
   assert.equal(normalizeGrowthEventOrigin('server'), 'system');
