@@ -1,6 +1,7 @@
 import { ToolLoopAgent, isStepCount, tool } from "ai";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildFunnelStageRows, preparePrimaryAnalyticsEvents } from "@/lib/growth-analytics";
 
 type Trigger = "manual" | "scheduled";
 type AgentSettings = {
@@ -35,7 +36,7 @@ async function buildSnapshot(db: SupabaseClient) {
   const now = new Date();
   const [eventsResult, jobsResult, campaignsResult, metricsResult, actionsResult, insightsResult] = await Promise.all([
     db.from("growth_events")
-      .select("event_name,session_id,service_type,city,current_source,booking_ref,occurred_at")
+      .select("event_name,session_id,service_type,city,first_source,first_medium,first_campaign,first_campaign_id,current_source,current_medium,current_campaign,current_campaign_id,booking_step,step_number,booking_ref,occurred_at")
       .gte("occurred_at", previousFrom.toISOString()).order("occurred_at", { ascending: false }).limit(20000),
     db.from("jobs")
       .select("job_date,service_type,city,status,gross_amount,factory_net")
@@ -49,7 +50,8 @@ async function buildSnapshot(db: SupabaseClient) {
   const error = [eventsResult, jobsResult, campaignsResult, metricsResult, actionsResult, insightsResult].find((r) => r.error)?.error;
   if (error) throw error;
 
-  const events = eventsResult.data || [];
+  const rawEvents = eventsResult.data || [];
+  const events = preparePrimaryAnalyticsEvents(rawEvents);
   const jobs = jobsResult.data || [];
   const metrics = metricsResult.data || [];
   const split = currentFrom.getTime();
@@ -77,6 +79,11 @@ async function buildSnapshot(db: SupabaseClient) {
       bookingSubmitted: eventCount("booking_submitted"),
       confirmed,
       conversionPercent: ratio(confirmed, sessions),
+      funnel: buildFunnelStageRows(periodEvents).map((stage) => ({
+        key: stage.key,
+        label: stage.label,
+        sessions: stage.sessions,
+      })),
       sources: Object.fromEntries(Object.entries(bySource).map(([source, value]) => [source, {
         sessions: value.sessions.size,
         confirmed: value.confirmed.size,
@@ -105,6 +112,8 @@ async function buildSnapshot(db: SupabaseClient) {
     activeInsights: insightsResult.data || [],
     dataHealth: {
       eventsAvailable: events.length,
+      rawEventsAvailable: rawEvents.length,
+      excludedTestEvents: rawEvents.length - events.length,
       latestEventAt: events[0]?.occurred_at || null,
       campaignMetricsAvailable: metrics.length,
       warning: events.length >= 20000 ? "event query reached its safety limit" : null,
