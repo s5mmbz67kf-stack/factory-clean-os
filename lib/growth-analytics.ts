@@ -154,8 +154,45 @@ export function filterPrimaryAnalyticsEvents<T extends AttributableGrowthEvent>(
   return events.filter((event) => !testSessions.has(event.session_id));
 }
 
+export function canonicalizeTrafficSource(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const source = value.trim().toLowerCase();
+  if (!source) return null;
+
+  if (
+    source === "google" ||
+    source === "www.google.com" ||
+    source.endsWith(".google.com") ||
+    source === "com.google.android.googlequicksearchbox"
+  ) return "google";
+
+  if (
+    source === "facebook" ||
+    source === "fb" ||
+    source === "www.facebook.com" ||
+    source === "m.facebook.com" ||
+    source === "l.facebook.com" ||
+    source.endsWith(".facebook.com")
+  ) return "facebook";
+
+  if (source === "instagram" || source === "ig" || source === "www.instagram.com" || source.endsWith(".instagram.com")) {
+    return "instagram";
+  }
+
+  if (source === "whatsapp" || source === "wa.me" || source === "l.wl.co") return "whatsapp";
+  return source.startsWith("www.") ? source.slice(4) : source;
+}
+
+export function canonicalizeEventSources<T extends AttributableGrowthEvent>(events: readonly T[]): T[] {
+  return events.map((event) => ({
+    ...event,
+    first_source: canonicalizeTrafficSource(event.first_source),
+    current_source: canonicalizeTrafficSource(event.current_source),
+  }));
+}
+
 export function preparePrimaryAnalyticsEvents<T extends AttributableGrowthEvent>(events: readonly T[]): T[] {
-  return filterPrimaryAnalyticsEvents(inheritBookingConfirmationAttribution(events));
+  return canonicalizeEventSources(filterPrimaryAnalyticsEvents(inheritBookingConfirmationAttribution(events)));
 }
 
 const FIXED_FUNNEL_PREFIX = [
