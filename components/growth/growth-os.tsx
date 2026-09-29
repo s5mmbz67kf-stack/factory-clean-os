@@ -565,8 +565,8 @@ const ACTION_TYPE_LABELS: Record<ActionItem["type"], string> = { do_now: "לבי
 
 function computePeriodStats(periodEvents: GrowthEvent[], linkByRef: Map<string, BookingJobLink>, jobById: Map<string, GrowthJob>, campaignMetrics: CampaignMetric[], range: { from: Date; to: Date }) {
   const sessions = new Set(periodEvents.map((e) => e.session_id)).size;
-  const bookingStarts = periodEvents.filter((e) => e.event_name === "booking_started").length;
-  const bookingSubmitted = periodEvents.filter((e) => e.event_name === "booking_submitted").length;
+  const bookingStarts = new Set(periodEvents.filter((e) => e.event_name === "booking_started").map((e) => e.session_id)).size;
+  const bookingSubmitted = new Set(periodEvents.filter((e) => e.event_name === "booking_submitted").map((e) => e.session_id)).size;
   const confirmedRefs = new Set(periodEvents.filter((e) => e.event_name === "booking_confirmed" && e.booking_ref).map((e) => e.booking_ref as string));
   const confirmed = confirmedRefs.size;
 
